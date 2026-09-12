@@ -20,7 +20,7 @@ simplelog = "0.12.2"
 dirs = "7.0.0"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 tray-icon = "0.25.0"
 tao = "0.37.0"
 global-hotkey = "0.8.0"

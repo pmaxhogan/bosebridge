@@ -28,7 +28,8 @@ fn attach_parent_console() {
     // stdout is already a pipe (ssh, PowerShell capture) leave it alone, since
     // AttachConsole would replace the pipe with the console.
     unsafe {
-        let has_stdout = matches!(GetStdHandle(STD_OUTPUT_HANDLE), Ok(h) if !h.is_invalid() && h != INVALID_HANDLE_VALUE);
+        let has_stdout =
+            matches!(GetStdHandle(STD_OUTPUT_HANDLE), Ok(h) if !h.is_invalid() && h != INVALID_HANDLE_VALUE);
         if !has_stdout {
             let _ = AttachConsole(ATTACH_PARENT_PROCESS);
         }

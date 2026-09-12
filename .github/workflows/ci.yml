@@ -36,6 +36,7 @@ jobs:
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex 'bosebridge/src/(main|cli)\.rs' --fail-under-lines "$MIN_LINE_COVERAGE"
       - name: Coverage summary
         if: always()
+        continue-on-error: true
         run: cargo llvm-cov report --summary-only --ignore-filename-regex 'bosebridge/src/(main|cli)\.rs'
       - uses: actions/upload-artifact@v7
         if: always()

@@ -52,7 +52,7 @@ AVAILABLE_TO_CONNECT=18`.
 | list devices | `04 04 01 00` | STATUS: one lead byte, then 6-byte MACs |
 | info | `04 05 01 06 <mac>` | STATUS: `<mac> <flags> <b7> <b8> <name...>` |
 | connect | `04 01 05 07 00 <mac>` | PROCESSING `<mac>`, then RESULT `<mac> 0f 00` |
-| disconnect | `04 02 05 07 00 <mac>` | same shape |
+| disconnect | `04 02 05 06 <mac>` | same shape (no leading flag byte; with one the headphones answer InvalidData) |
 
 `flags` bits: 0 connected, 1 the device that asked, 2 another Bose product
 (for those, bytes 7..8 are a product id, byte 9 a variant, and the name starts

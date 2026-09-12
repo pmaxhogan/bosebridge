@@ -360,11 +360,10 @@ pub mod request {
         Packet::new(fblock::DEVICE_MANAGEMENT, dm::CONNECT, Operator::Start, payload)
     }
 
-    /// The toggle switched off.
+    /// The toggle switched off. Unlike CONNECT there is no leading flag byte;
+    /// the headphones answer InvalidData if one is included.
     pub fn disconnect(mac: Mac) -> Packet {
-        let mut payload = vec![0u8];
-        payload.extend_from_slice(&mac.0);
-        Packet::new(fblock::DEVICE_MANAGEMENT, dm::DISCONNECT, Operator::Start, payload)
+        Packet::new(fblock::DEVICE_MANAGEMENT, dm::DISCONNECT, Operator::Start, mac.0)
     }
 }
 

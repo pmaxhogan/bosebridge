@@ -37,7 +37,7 @@ jobs:
       - name: Coverage summary
         if: always()
         run: cargo llvm-cov report --summary-only --ignore-filename-regex 'bosebridge/src/(main|cli)\.rs'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -59,7 +59,7 @@ jobs:
         run: cargo test --workspace
       - name: Release build
         run: cargo build --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bosebridge-windows
           path: target/release/bosebridge.exe

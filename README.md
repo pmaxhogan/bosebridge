@@ -65,16 +65,25 @@ auto-detected; the fields worth touching:
 | `auto_reconnect` | true | whether the watcher acts on its own |
 | `hotkey` | `Ctrl+Alt+Shift+H` | global "connect now" hotkey; empty to disable |
 
-## Failure model
+## Failure model (verified 2026-09-11, QC Ultra 2nd gen, Pixel 8 + Windows 11 desktop)
 
-Verified on a Pixel-plus-desktop multipoint setup with QC Ultra (2nd gen):
-
-- The headphones' own status byte reports the PC as "connected" whenever any
-  Bluetooth link (including this tool's serial port) is up, so it cannot be
-  used to detect the missing-audio state. Windows' audio endpoint list can.
-- In one observed case the desktop merely opening the serial port was enough for
-  the headphones to bring audio up on their own; the explicit `Connect` is the
-  belt to that suspender.
+- Flipping the Bose toggle off is `DeviceManagement.Disconnect`. The headphones
+  then drop the desktop's Bluetooth link entirely, and Windows does not try to
+  reconnect on its own afterwards.
+- From that state, opening the serial port brings the link up, but a bare link
+  drops again within seconds unless something holds it. bosebridge sends
+  `Connect` and keeps the port open until the audio endpoint appears; audio
+  came back 4.7 seconds after the command in testing.
+- The headphones acknowledge `Connect` with PROCESSING and, in that state, never
+  send a RESULT. bosebridge treats "acknowledged, then the endpoint appeared" as
+  success.
+- While the tool's own serial link is open, the headphones report the PC as
+  "connected" whatever the audio state, so the tool judges audio by Windows'
+  endpoint list, never by that byte.
+- When Windows does reconnect the link but audio does not follow (the original
+  complaint), the watcher sees link-up-without-endpoint and nudges after the
+  debounce. When the link itself is down, the watcher stays quiet by design;
+  press the hotkey or the tray button instead.
 
 See [docs/protocol.md](docs/protocol.md) for the wire protocol.
 

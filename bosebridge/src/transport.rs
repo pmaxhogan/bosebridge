@@ -25,7 +25,7 @@ pub struct Headphones<P: Read + Write = Box<dyn serialport::SerialPort>> {
 
 const QUIET: Duration = Duration::from_millis(600);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(4);
-const START_TIMEOUT: Duration = Duration::from_secs(12);
+const START_TIMEOUT: Duration = Duration::from_secs(3);
 
 impl Headphones<Box<dyn serialport::SerialPort>> {
     pub fn open(port_name: &str) -> Result<Self> {
@@ -160,15 +160,20 @@ impl<P: Read + Write> Headphones<P> {
     }
 
     /// Ask the headphones to bring up their audio profiles to `mac`.
-    pub fn connect(&mut self, mac: Mac) -> Result<bmap::ConnectResult> {
+    /// `Ok(None)` means the headphones acknowledged (PROCESSING) but sent no
+    /// RESULT within `start_timeout`; after a deliberate disconnect that is the
+    /// normal case and audio still comes up as long as the link is held open.
+    pub fn connect(&mut self, mac: Mac) -> Result<Option<bmap::ConnectResult>> {
         self.start_and_wait(bmap::request::connect(mac), "connect")
     }
 
-    pub fn disconnect(&mut self, mac: Mac) -> Result<bmap::ConnectResult> {
+    /// `Ok(None)` is expected here too: the headphones drop the link before
+    /// the RESULT can be delivered.
+    pub fn disconnect(&mut self, mac: Mac) -> Result<Option<bmap::ConnectResult>> {
         self.start_and_wait(bmap::request::disconnect(mac), "disconnect")
     }
 
-    fn start_and_wait(&mut self, request: Packet, what: &str) -> Result<bmap::ConnectResult> {
+    fn start_and_wait(&mut self, request: Packet, what: &str) -> Result<Option<bmap::ConnectResult>> {
         let replies = self.exchange_until(
             &request,
             |p| matches!(p.operator, bmap::Operator::Result | bmap::Operator::Error),
@@ -188,7 +193,10 @@ impl<P: Read + Write> Headphones<P> {
                 Err(e) => return Err(anyhow!("{what} failed: {e}")),
             }
         }
-        result.ok_or_else(|| anyhow!("{what}: headphones acknowledged but sent no result"))
+        if result.is_none() {
+            log::info!("{what}: acknowledged, no result within {:?}", self.start_timeout);
+        }
+        Ok(result)
     }
 }
 
@@ -318,7 +326,7 @@ mod tests {
             b("04 01 07 06 c8 94 02 70 6e 56"),
             b("04 01 06 08 c8 94 02 70 6e 56 0f 00"),
         ]]);
-        let r = h.connect(DESKTOP).unwrap();
+        let r = h.connect(DESKTOP).unwrap().unwrap();
         assert_eq!(r.mac, DESKTOP);
         assert_eq!(r.extra, vec![0x0f, 0x00]);
         assert_eq!(h.port.written, vec![b("04 01 05 07 00 c8 94 02 70 6e 56")]);
@@ -327,15 +335,14 @@ mod tests {
     #[test]
     fn disconnect_uses_function_two() {
         let mut h = hp(vec![vec![b("04 02 06 06 c8 94 02 70 6e 56")]]);
-        assert!(h.disconnect(DESKTOP).is_ok());
+        assert!(h.disconnect(DESKTOP).unwrap().is_some());
         assert_eq!(h.port.written[0][1], 2);
     }
 
     #[test]
-    fn connect_with_only_processing_is_an_error() {
+    fn connect_with_only_processing_is_pending_not_an_error() {
         let mut h = hp(vec![vec![b("04 01 07 06 c8 94 02 70 6e 56")]]);
-        let e = h.connect(DESKTOP).unwrap_err().to_string();
-        assert!(e.contains("no result"), "{e}");
+        assert_eq!(h.connect(DESKTOP).unwrap(), None);
     }
 
     #[test]
@@ -353,7 +360,7 @@ mod tests {
         // PROCESSING immediately, then RESULT after a pause longer than `quiet`.
         let mut h = hp(vec![vec![b("04 01 07 06 c8 94 02 70 6e 56")]]);
         h.port.late = Some((Duration::from_millis(120), b("04 01 06 08 c8 94 02 70 6e 56 0f 00")));
-        let r = h.connect(DESKTOP).unwrap();
+        let r = h.connect(DESKTOP).unwrap().unwrap();
         assert_eq!(r.extra, vec![0x0f, 0x00]);
     }
 

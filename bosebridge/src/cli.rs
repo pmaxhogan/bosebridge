@@ -127,25 +127,34 @@ pub fn run() -> Result<()> {
         Cmd::Connect { mac } => {
             let r = watch::resolve(&mut config)?;
             let target = target(&r, mac)?;
-            let mut hp = Headphones::open(&r.port)?;
-            let res = hp.connect(target)?;
-            println!(
-                "connect {} acknowledged (result bytes {})",
-                res.mac,
-                bmap::hex(&res.extra)
-            );
+            if target == r.local_mac {
+                watch::nudge(&r)?;
+                println!("connected: audio endpoint is present");
+            } else {
+                let mut hp = Headphones::open(&r.port)?;
+                match hp.connect(target)? {
+                    Some(res) => println!(
+                        "connect {} acknowledged (result bytes {})",
+                        res.mac,
+                        bmap::hex(&res.extra)
+                    ),
+                    None => println!("connect {target} acknowledged; no result reported"),
+                }
+            }
             Ok(())
         }
         Cmd::Disconnect { mac } => {
             let r = watch::resolve(&mut config)?;
             let target = target(&r, mac)?;
             let mut hp = Headphones::open(&r.port)?;
-            let res = hp.disconnect(target)?;
-            println!(
-                "disconnect {} acknowledged (result bytes {})",
-                res.mac,
-                bmap::hex(&res.extra)
-            );
+            match hp.disconnect(target)? {
+                Some(res) => println!(
+                    "disconnect {} acknowledged (result bytes {})",
+                    res.mac,
+                    bmap::hex(&res.extra)
+                ),
+                None => println!("disconnect {target} acknowledged; the link dropped before a result, which is normal"),
+            }
             Ok(())
         }
         Cmd::Watch { ticks } => {

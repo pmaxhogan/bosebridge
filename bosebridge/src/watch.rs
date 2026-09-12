@@ -81,16 +81,45 @@ pub fn resolve(config: &mut Config) -> Result<Resolved> {
     })
 }
 
-/// Open the port, send CONNECT for this PC, close. Returns the headphones' result bytes.
-pub fn nudge(r: &Resolved) -> Result<bmap::ConnectResult> {
+/// How long to keep the serial link open after CONNECT while waiting for the
+/// audio endpoint. Closing early drops the bare link before profiles come up.
+const SETTLE: Duration = Duration::from_secs(15);
+
+/// Open the port, send CONNECT for this PC, hold the link until audio appears
+/// (or `SETTLE` passes), then close. Succeeds when the endpoint shows up, or
+/// when it cannot be checked; fails if the headphones refused or audio never came.
+pub fn nudge(r: &Resolved) -> Result<()> {
     let mut hp = Headphones::open(&r.port)?;
-    let res = hp.connect(r.local_mac)?;
-    log::info!(
-        "headphones acknowledged connect for {} (extra {})",
-        res.mac,
-        bmap::hex(&res.extra)
-    );
-    Ok(res)
+    match hp.connect(r.local_mac)? {
+        Some(res) => log::info!(
+            "headphones returned connect result for {} (extra {})",
+            res.mac,
+            bmap::hex(&res.extra)
+        ),
+        None => log::info!("headphones acknowledged connect; holding the link while audio comes up"),
+    }
+    let t0 = Instant::now();
+    while t0.elapsed() < SETTLE {
+        match win::endpoint_present(&r.endpoint_match) {
+            Ok(true) => {
+                log::info!(
+                    "audio endpoint present {:.1}s after connect",
+                    t0.elapsed().as_secs_f32()
+                );
+                return Ok(());
+            }
+            Ok(false) => {}
+            Err(e) => {
+                log::warn!("could not check the audio endpoint: {e:#}");
+                return Ok(());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(anyhow!(
+        "audio endpoint still absent {:.0}s after connect; released the link",
+        t0.elapsed().as_secs_f32()
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -304,6 +333,12 @@ mod tests {
     fn nudge_fails_cleanly_without_a_port() {
         let e = nudge(&resolved()).unwrap_err().to_string();
         assert!(e.contains("COM0"), "{e}");
+    }
+
+    #[test]
+    fn settle_is_long_enough_for_profiles_to_come_up() {
+        // Observed: about 12s from CONNECT to the endpoint after a deliberate disconnect.
+        assert!(SETTLE >= Duration::from_secs(12));
     }
 
     #[cfg(not(windows))]

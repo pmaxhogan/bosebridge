@@ -30,9 +30,6 @@ pub struct Config {
     pub max_attempts: u32,
     /// Whether the watcher nudges automatically (the tray toggle).
     pub auto_reconnect: bool,
-    /// Keep the serial port open between nudges. Off by default: holding the
-    /// link may defeat the headphones' auto-off and costs battery.
-    pub keep_port_open: bool,
     /// Global hotkey for "connect now", in global-hotkey syntax.
     pub hotkey: Option<String>,
 }
@@ -49,7 +46,6 @@ impl Default for Config {
             cooldown_secs: 30,
             max_attempts: 4,
             auto_reconnect: true,
-            keep_port_open: false,
             hotkey: Some("Ctrl+Alt+Shift+H".to_string()),
         }
     }
@@ -123,7 +119,7 @@ mod tests {
         let c = Config {
             headphones_mac: Some("68:F2:1F:37:02:82".into()),
             endpoint_match: Some("phones".into()),
-            keep_port_open: true,
+            poll_secs: 7,
             ..Config::default()
         };
         let text = toml::to_string_pretty(&c).unwrap();

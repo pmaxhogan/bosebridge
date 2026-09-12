@@ -1,0 +1,10 @@
+[package]
+name = "bmap"
+description = "Encoder/decoder for the Bose BMAP protocol spoken over the headphones' Bluetooth serial port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]

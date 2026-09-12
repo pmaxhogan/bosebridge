@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/bmap", "crates/decision", "bosebridge"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/pmaxhogan/bosebridge"
+authors = ["Max Hogan <max@maxhogan.dev>"]
+
+[workspace.dependencies]
+bmap = { path = "crates/bmap" }
+decision = { path = "crates/decision" }
+anyhow = "1.0.104"
+log = "0.4.34"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

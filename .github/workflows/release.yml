@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  # Merges performed with the workflow token (Dependabot auto-merge) do not
+  # trigger push workflows, so a daily pass releases any HEAD not yet tagged.
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Is HEAD already released?
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.probe.outputs.needed }}
+      version: ${{ steps.probe.outputs.version }}
+      tag: ${{ steps.probe.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: probe
+        run: |
+          base="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+)\.[0-9]+".*/\1/')"
+          patch="$(git rev-list --count HEAD)"
+          {
+            echo "version=${base}.${patch}"
+            echo "tag=v${base}.${patch}"
+          } >> "$GITHUB_OUTPUT"
+          if [ -n "$(git tag --points-at HEAD 'v*')" ]; then
+            echo "HEAD already tagged: $(git tag --points-at HEAD 'v*' | tr '\n' ' ')"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: Build and publish
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Gate on tests
+        run: cargo test --workspace
+      - name: Build
+        env:
+          BOSEBRIDGE_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          cargo build --release
+          Copy-Item target/release/bosebridge.exe "bosebridge-${{ needs.check.outputs.version }}.exe"
+          & ".\bosebridge-${{ needs.check.outputs.version }}.exe" --version
+      - name: Release notes
+        shell: bash
+        run: |
+          prev="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)"
+          {
+            echo "## bosebridge ${{ needs.check.outputs.version }}"
+            echo
+            if [ -n "$prev" ]; then
+              echo "Changes since $prev:"
+              echo
+              git log --no-merges --pretty='- %s (%h)' "$prev"..HEAD
+            else
+              echo "First release."
+            fi
+          } > notes.md
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.check.outputs.tag }}" \
+            "bosebridge-${{ needs.check.outputs.version }}.exe" \
+            --title "bosebridge ${{ needs.check.outputs.version }}" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA"

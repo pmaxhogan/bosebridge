@@ -532,7 +532,7 @@ mod tests {
         );
         assert_eq!(
             request::disconnect(DESKTOP).encode(),
-            b("04 02 05 07 00 c8 94 02 70 6e 56")
+            b("04 02 05 06 c8 94 02 70 6e 56")
         );
     }
 

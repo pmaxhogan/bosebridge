@@ -18,10 +18,14 @@ pub struct Headphones<P: Read + Write = Box<dyn serialport::SerialPort>> {
     pub quiet: Duration,
     /// Give up waiting for any reply after this.
     pub reply_timeout: Duration,
+    /// How long a START command may take to produce its RESULT. Bringing audio
+    /// profiles up after a deliberate disconnect takes several seconds.
+    pub start_timeout: Duration,
 }
 
 const QUIET: Duration = Duration::from_millis(600);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(4);
+const START_TIMEOUT: Duration = Duration::from_secs(12);
 
 impl Headphones<Box<dyn serialport::SerialPort>> {
     pub fn open(port_name: &str) -> Result<Self> {
@@ -43,6 +47,7 @@ impl<P: Read + Write> Headphones<P> {
             decoder: FrameDecoder::new(),
             quiet: QUIET,
             reply_timeout: REPLY_TIMEOUT,
+            start_timeout: START_TIMEOUT,
         }
     }
 
@@ -88,6 +93,49 @@ impl<P: Read + Write> Headphones<P> {
         Ok(out)
     }
 
+    /// Write one request and keep reading until `done` matches a frame or
+    /// `timeout` passes. Returns every frame seen. Used for START commands,
+    /// whose RESULT can arrive seconds after the PROCESSING acknowledgement.
+    pub fn exchange_until(
+        &mut self,
+        request: &Packet,
+        done: impl Fn(&Packet) -> bool,
+        timeout: Duration,
+    ) -> Result<Vec<Packet>> {
+        let bytes = request.encode();
+        log::debug!("> {}", bmap::hex(&bytes));
+        self.decoder.clear();
+        self.port.write_all(&bytes).context("writing to the headphones")?;
+        self.port.flush().ok();
+
+        let mut out = Vec::new();
+        let start = Instant::now();
+        let mut buf = [0u8; 512];
+        while start.elapsed() < timeout {
+            match self.port.read(&mut buf) {
+                Ok(0) => {}
+                Ok(n) => {
+                    log::debug!("< {}", bmap::hex(&buf[..n]));
+                    for frame in self.decoder.feed(&buf[..n]) {
+                        match frame {
+                            Ok(p) => {
+                                let finished = done(&p);
+                                out.push(p);
+                                if finished {
+                                    return Ok(out);
+                                }
+                            }
+                            Err(e) => log::warn!("undecodable frame from headphones: {e}"),
+                        }
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => return Err(anyhow!("reading from the headphones: {e}")),
+            }
+        }
+        Ok(out)
+    }
+
     fn one(&mut self, request: &Packet) -> Result<Packet> {
         let replies = self.exchange(request)?;
         let first = replies.into_iter().next().ok_or_else(|| anyhow!("empty reply"))?;
@@ -121,7 +169,17 @@ impl<P: Read + Write> Headphones<P> {
     }
 
     fn start_and_wait(&mut self, request: Packet, what: &str) -> Result<bmap::ConnectResult> {
-        let replies = self.exchange(&request)?;
+        let replies = self.exchange_until(
+            &request,
+            |p| matches!(p.operator, bmap::Operator::Result | bmap::Operator::Error),
+            self.start_timeout,
+        )?;
+        if replies.is_empty() {
+            return Err(anyhow!(
+                "{what}: no reply from the headphones within {:?}",
+                self.start_timeout
+            ));
+        }
         let mut result = None;
         for p in replies {
             match bmap::parse_connect_result(&p) {
@@ -161,6 +219,9 @@ mod tests {
         pending: VecDeque<Vec<u8>>,
         fail_reads: bool,
         fail_writes: bool,
+        /// A chunk delivered once, this long after the first write.
+        late: Option<(Duration, Vec<u8>)>,
+        first_write: Option<Instant>,
     }
 
     impl Fake {
@@ -171,6 +232,8 @@ mod tests {
                 pending: VecDeque::new(),
                 fail_reads: false,
                 fail_writes: false,
+                late: None,
+                first_write: None,
             }
         }
     }
@@ -179,6 +242,12 @@ mod tests {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             if self.fail_reads {
                 return Err(io::Error::other("port vanished"));
+            }
+            if let (Some((after, _)), Some(t0)) = (&self.late, self.first_write) {
+                if t0.elapsed() >= *after {
+                    let (_, chunk) = self.late.take().unwrap();
+                    self.pending.push_back(chunk);
+                }
             }
             match self.pending.pop_front() {
                 Some(chunk) => {
@@ -199,6 +268,7 @@ mod tests {
                 return Err(io::Error::other("write failed"));
             }
             self.written.push(buf.to_vec());
+            self.first_write.get_or_insert_with(Instant::now);
             if let Some(reply) = self.replies.pop_front() {
                 self.pending.extend(reply);
             }
@@ -219,6 +289,7 @@ mod tests {
         let mut h = Headphones::with_port(Fake::new(replies));
         h.quiet = Duration::from_millis(30);
         h.reply_timeout = Duration::from_millis(150);
+        h.start_timeout = Duration::from_millis(300);
         h
     }
 
@@ -275,6 +346,22 @@ mod tests {
         let mut h = hp(vec![vec![b("00 01 04 01 0c")]]);
         let e = h.bmap_version().unwrap_err().to_string();
         assert!(e.contains("Busy"), "{e}");
+    }
+
+    #[test]
+    fn connect_result_arriving_late_is_still_collected() {
+        // PROCESSING immediately, then RESULT after a pause longer than `quiet`.
+        let mut h = hp(vec![vec![b("04 01 07 06 c8 94 02 70 6e 56")]]);
+        h.port.late = Some((Duration::from_millis(120), b("04 01 06 08 c8 94 02 70 6e 56 0f 00")));
+        let r = h.connect(DESKTOP).unwrap();
+        assert_eq!(r.extra, vec![0x0f, 0x00]);
+    }
+
+    #[test]
+    fn connect_with_no_reply_at_all_times_out() {
+        let mut h = hp(vec![]);
+        let e = h.connect(DESKTOP).unwrap_err().to_string();
+        assert!(e.contains("no reply"), "{e}");
     }
 
     #[test]

@@ -28,7 +28,7 @@ jobs:
       version: ${{ steps.probe.outputs.version }}
       tag: ${{ steps.probe.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: probe
@@ -52,7 +52,7 @@ jobs:
     if: needs.check.outputs.needed == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable

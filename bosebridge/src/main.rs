@@ -21,10 +21,17 @@ fn main() {
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn attach_parent_console() {
-    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
-    // Fails harmlessly when there is no parent console (launched from the Run key).
+    use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE};
+    // A GUI-subsystem process gets no std handles when started from a console
+    // window, so attach to the parent's console to show CLI output there. When
+    // stdout is already a pipe (ssh, PowerShell capture) leave it alone, since
+    // AttachConsole would replace the pipe with the console.
     unsafe {
-        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        let has_stdout = matches!(GetStdHandle(STD_OUTPUT_HANDLE), Ok(h) if !h.is_invalid() && h != INVALID_HANDLE_VALUE);
+        if !has_stdout {
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
     }
 }
 

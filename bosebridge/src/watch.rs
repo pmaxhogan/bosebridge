@@ -229,3 +229,88 @@ fn set_error(status: &SharedStatus, msg: String) {
     let mut s = status.lock().unwrap();
     s.last_error = if msg.is_empty() { None } else { Some(msg) };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn resolved() -> Resolved {
+        Resolved {
+            headphones_mac: Mac([0x68, 0xf2, 0x1f, 0x37, 0x02, 0x82]),
+            port: "COM0".into(),
+            local_mac: Mac([0xc8, 0x94, 0x02, 0x70, 0x6e, 0x56]),
+            endpoint_match: "(phones)".into(),
+            headphones_name: "phones".into(),
+        }
+    }
+
+    #[test]
+    fn run_stops_after_max_ticks_and_records_status() {
+        let config = Config {
+            poll_secs: 1,
+            ..Config::default()
+        };
+        let (_tx, rx) = mpsc::channel();
+        let status: SharedStatus = Arc::new(Mutex::new(Default::default()));
+        run(&config, &resolved(), rx, status.clone(), Some(1)).unwrap();
+        let s = status.lock().unwrap();
+        assert!(s.auto);
+        assert!(s.updated.is_some());
+        // Off Windows the observation fails and is reported, and the watcher treats it as link down.
+        assert!(!s.link_up);
+        assert_eq!(s.summary, "headphones not connected");
+        #[cfg(not(windows))]
+        assert!(s.last_error.as_deref().unwrap_or("").contains("Windows"));
+    }
+
+    #[test]
+    fn commands_are_honoured_between_ticks() {
+        let config = Config {
+            poll_secs: 1,
+            ..Config::default()
+        };
+        let (tx, rx) = mpsc::channel();
+        let status: SharedStatus = Arc::new(Mutex::new(Default::default()));
+        tx.send(Command::SetAuto(false)).unwrap();
+        tx.send(Command::ConnectNow).unwrap();
+        tx.send(Command::Quit).unwrap();
+        let t0 = Instant::now();
+        run(&config, &resolved(), rx, status.clone(), None).unwrap();
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "quit should end the loop promptly"
+        );
+        let s = status.lock().unwrap();
+        assert!(!s.auto, "SetAuto(false) should have been applied");
+        // The manual connect targets a port that does not exist, so it fails loudly;
+        // off Windows the following observation also fails and may overwrite it.
+        assert!(s.last_error.is_some());
+    }
+
+    #[test]
+    fn dropping_the_sender_ends_the_loop() {
+        let config = Config {
+            poll_secs: 1,
+            ..Config::default()
+        };
+        let (tx, rx) = mpsc::channel::<Command>();
+        drop(tx);
+        let status: SharedStatus = Arc::new(Mutex::new(Default::default()));
+        run(&config, &resolved(), rx, status, None).unwrap();
+    }
+
+    #[test]
+    fn nudge_fails_cleanly_without_a_port() {
+        let e = nudge(&resolved()).unwrap_err().to_string();
+        assert!(e.contains("COM0"), "{e}");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_and_observe_need_windows() {
+        let mut c = Config::default();
+        assert!(resolve(&mut c).is_err());
+        assert!(observe(&resolved()).is_err());
+    }
+}

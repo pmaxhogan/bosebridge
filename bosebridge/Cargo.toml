@@ -21,7 +21,7 @@ dirs = "7.0.0"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
-tray-icon = "0.25.0"
+tray-icon = "0.26.0"
 tao = "0.37.0"
 global-hotkey = "0.8.0"
 windows = { version = "0.62.2", features = [

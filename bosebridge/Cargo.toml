@@ -23,7 +23,7 @@ dirs = "7.0.0"
 winreg = "0.56"
 tray-icon = "0.26.0"
 tao = "0.37.0"
-global-hotkey = "0.8.0"
+global-hotkey = "0.9.0"
 windows = { version = "0.62.2", features = [
     "Devices_Bluetooth",
     "Devices_Enumeration",
